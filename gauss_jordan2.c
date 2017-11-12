@@ -12,13 +12,13 @@
 
 #define ERROR_INCORRECT_ARGC	-1
 
-void swap_rows(float **row1_ptr, float **row2_ptr, unsigned int row_length) {
-	float *aux = (float *) malloc(row_length * sizeof(float));
-	float *aux_ptr = NULL;
+void swap_rows(double **row1_ptr, double **row2_ptr, unsigned int row_length) {
+	double *aux = (double *) malloc(row_length * sizeof(double));
+	double *aux_ptr = NULL;
 
-	memcpy(aux, *row1_ptr, row_length * sizeof(float));
-	memcpy(*row1_ptr, *row2_ptr, row_length * sizeof(float));
-	memcpy(*row2_ptr, aux, row_length * sizeof(float));
+	memcpy(aux, *row1_ptr, row_length * sizeof(double));
+	memcpy(*row1_ptr, *row2_ptr, row_length * sizeof(double));
+	memcpy(*row2_ptr, aux, row_length * sizeof(double));
 	free(aux);
 
 	aux_ptr = *row1_ptr;
@@ -28,6 +28,9 @@ void swap_rows(float **row1_ptr, float **row2_ptr, unsigned int row_length) {
 
 int main(int argc, char **argv) {
 	int i, j, k;
+
+	int thread_count;
+	thread_count = (argc == 2) ? atoi(argv[1]) : 2;
 
 	/* Inicializa o pseudo-gerador de números aleatórios */
 	srand(time(NULL));
@@ -43,34 +46,35 @@ int main(int argc, char **argv) {
 	int world_rank;
 	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-	float *matrix = NULL;
-	float **row_pointers = NULL;
-	float *vector = NULL;
+	double *matrix = NULL;
+	double **row_pointers = NULL;
+	double *vector = NULL;
 	unsigned int dim;
 
 	if(world_rank == RANK_ROOT) {
-		matrix = (float *) malloc(MATRIX_MAX_DIMENSION * MATRIX_MAX_DIMENSION * sizeof(float));
+		matrix = (double *) malloc(MATRIX_MAX_DIMENSION * MATRIX_MAX_DIMENSION * sizeof(double));
 		FILE *file = fopen("matriz.txt", "r");
-		float input;
 		unsigned int read = 0;
 		while(!feof(file))
-			fscanf(file, "%f", &matrix[read++]);
+			fscanf(file, "%lf", &matrix[read++]);
 
 		fclose(file);
 
 		dim = (unsigned int) sqrt((double) read);
-		row_pointers = (float**) malloc(dim * sizeof(float *));
+		row_pointers = (double**) malloc(dim * sizeof(double *));
 		for(i = 0; i < dim; i++) {
 			row_pointers[i] = &matrix[i * dim];
 		}
 
 		file = fopen("vetor.txt", "r");
-		vector = (float *) malloc(dim * sizeof(float));
+		vector = (double *) malloc(dim * sizeof(double));
 		read = 0;
 		while(!feof(file))
-			fscanf(file, "%f", &vector[read++]);
+			fscanf(file, "%lf", &vector[read++]);
 
-		for(i = 0; i < dim; i++) {
+		fclose(file);
+
+		/*for(i = 0; i < dim; i++) {
 			if(*(row_pointers[i] + i) == 0) {
 				for(j = 0; j < dim; j++) {
 					if((j != i) && (*(row_pointers[j] + i) != 0) && (*(row_pointers[i] + j) != 0)) {
@@ -78,78 +82,120 @@ int main(int argc, char **argv) {
 					}
 				}
 			}
-		}
+		}*/
 	}
 
 	MPI_Bcast(&dim, 1, MPI_UNSIGNED, RANK_ROOT, MPI_COMM_WORLD);
 
-	float *pivot_row = (float *) calloc(dim, sizeof(float));
-	float *up_rows = NULL;
-	float *up_vector = NULL;
-	float *update_rows = NULL;
-	float pivot_vector_element;
+	double *pivot_row = (double *) malloc(dim * sizeof(double));
+	double *up_rows = NULL;
+	double *up_vector = NULL;
+	double *update_rows = NULL;
+	double *update_vector = NULL;
+	double pivot_vector_element;
+	double *result_buffer;
+	double *result_vector;
+
+	int *displs = NULL;
+	int *displs2 = NULL;
+	int *scounts = NULL;
+	int *scounts2 = NULL;
+
+	displs = (int *) calloc(world_size, sizeof(int));
+	scounts = (int *) calloc(world_size, sizeof(int));
+	unsigned int rows_per_process = (unsigned int) ceil((double) dim / (double) world_size);
+
+	for(j = 0, k = 0; j < world_size; j++) {
+		displs[j] = j * rows_per_process * dim;
+		if((k + rows_per_process * dim) <= ((dim - 1) * dim)) {
+			scounts[j] = rows_per_process * dim;
+			k += rows_per_process * dim;
+		}
+		else {
+			scounts[j] = ((dim - 1) * dim) - k;
+			k += ((dim - 1) * dim) - k;
+			if(scounts[j] < 0) scounts[j] = 0;
+		}
+	}
+
+	up_rows = (double *) malloc(scounts[world_rank] * sizeof(double));
+	result_buffer = (double *) malloc(scounts[world_rank] * sizeof(double));
+
+	displs2 = (int *) calloc(world_size, sizeof(int));
+	scounts2 = (int *) calloc(world_size, sizeof(int));
+
+	for(j = 0, k = 0; j < world_size; j++) {
+		displs2[j] = j * rows_per_process;
+		if((k + rows_per_process) <= (dim -1)) {
+			scounts2[j] = rows_per_process;
+			k += rows_per_process;
+		}
+		else {
+			scounts2[j] = (dim - 1) - k;
+			k += (dim - 1) - k;
+			if(scounts2[j] < 0) scounts2[j] = 0;
+		}
+	}
+
+	up_vector = (double *) malloc(scounts2[world_rank] * sizeof(double));
+	result_vector = (double *) malloc(scounts2[world_rank] * sizeof(double));
 
 	/* Para cada linha da matriz seleciona o pivô (elemento da pertencente à diagonal principal) e atualiza os valores das outras linhas */
 	for(i = 0; i < dim; i++) {
 
 		/* Processo root aloca espaço para o buffer contendo as linhas que serão atualizadas na iteração do algoritmos (update_rows)*/
 		if(world_rank == RANK_ROOT) {
-			pivot_vector_element = vector[i];
-
 			if(!update_rows)
-				update_rows = (float *) malloc((dim - 1) * dim * sizeof(float));
+				update_rows = (double *) malloc((dim - 1) * dim * sizeof(double));
+			if(!update_vector)
+				update_vector = (double *) malloc((dim - 1) * sizeof(double));
 
 			int rindex = 0;
 
 			for(j = 0; j < dim; j++) {
 				if(j != i) {
-					memcpy(&update_rows[(rindex++) * dim], row_pointers[j], dim * sizeof(float));
+					update_vector[rindex] = vector[j];
+					memcpy(&update_rows[(rindex++) * dim], &matrix[j * dim], dim * sizeof(double));
 				}
 			}
 
-			memcpy(pivot_row, row_pointers[i], dim * sizeof(float));
+			memcpy(pivot_row, &matrix[i * dim], dim * sizeof(double));
+			pivot_vector_element = vector[i];
 		}
 
-		MPI_Bcast(pivot_row, dim, MPI_FLOAT, RANK_ROOT, MPI_COMM_WORLD);
+		MPI_Bcast(pivot_row, dim, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
-		MPI_Bcast(&pivot_vector_element, 1, MPI_FLOAT, RANK_ROOT, MPI_COMM_WORLD);
+		MPI_Bcast(&pivot_vector_element, 1, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
-		unsigned int rows_per_process = (unsigned int) (dim / world_size);
-		if(!up_rows) up_rows = (float *) malloc(rows_per_process * dim * sizeof(float));
-		MPI_Scatter(update_rows, rows_per_process * dim, MPI_FLOAT, up_rows, rows_per_process * dim, MPI_FLOAT, RANK_ROOT, MPI_COMM_WORLD);
+		MPI_Scatterv(update_rows, scounts, displs, MPI_DOUBLE, up_rows, scounts[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
+		MPI_Scatterv(update_vector, scounts2, displs2, MPI_DOUBLE, up_vector, scounts2[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
-		if(!up_vector) up_vector = (float *) malloc(rows_per_process * sizeof(float));
-		MPI_Scatter(vector, rows_per_process, MPI_FLOAT, up_vector, rows_per_process, MPI_FLOAT, RANK_ROOT, MPI_COMM_WORLD);
-
-		for(j = 0; j < rows_per_process; j++) {
+		for(j = 0; j < scounts2[world_rank]; j++) {
 			for(k = 0; k < dim; k++) {
-				up_rows[j * dim + k] = (pivot_row[i] * up_rows[j * dim + k]) - (up_rows[i * dim + i] * pivot_row[k]);
-				up_vector[j] = (pivot_row[i] * up_vector[j]) - (up_rows[i * dim + i] * pivot_vector_element);
+				result_buffer[j * dim + k] = (pivot_row[i] * up_rows[j * dim + k]) - (up_rows[j * dim + i] * pivot_row[k]);
+				result_vector[j] = (pivot_row[i] * up_vector[j]) - (up_rows[j * dim + i] * pivot_vector_element);
 			}
 		}
 
-		MPI_Gather(up_rows, rows_per_process * dim, MPI_FLOAT, update_rows, rows_per_process * dim, MPI_FLOAT, RANK_ROOT, MPI_COMM_WORLD);
-		MPI_Gather(up_vector, rows_per_process, MPI_FLOAT, vector, rows_per_process, MPI_FLOAT, RANK_ROOT, MPI_COMM_WORLD);
+		MPI_Gatherv(result_buffer, scounts[world_rank], MPI_DOUBLE, update_rows, scounts, displs, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
+		MPI_Gatherv(result_vector, scounts2[world_rank], MPI_DOUBLE, update_vector, scounts2, displs2, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
 		if(world_rank == RANK_ROOT) {
 			int rindex = 0;
 
 			for(j = 0; j < dim; j++) {
 				if(j != i) {
-					memcpy(row_pointers[j], &update_rows[rindex * dim], dim * sizeof(float));
-					rindex++;
+					vector[j] = update_vector[rindex];
+					memcpy(&matrix[j * dim], &update_rows[(rindex++) * dim], dim * sizeof(double));
 				}
 			}
 		}
 	}
 
 	if(world_rank == RANK_ROOT) {
-		int thread_count;
-		thread_count = (argc == 2) ? atoi(argv[1]) : 2;
-
 		#pragma omp parallel for private(i, j) num_threads(thread_count)
 		for(i = 0; i < dim; i++) {
-			float multiplier = (1 / (*(row_pointers[i] + i)));
+			double multiplier = (1 / (*(row_pointers[i] + i)));
 			for(j = 0; j < dim; j++)
 				*(row_pointers[i] + j) *= multiplier;
 			vector[i] *= multiplier;
@@ -170,6 +216,7 @@ int main(int argc, char **argv) {
 	free(up_rows);
 	free(up_vector);
 	free(update_rows);
+	free(update_vector);
 	/* ------- */
 
 	/* Encerra o ambiente de execução MPI */
