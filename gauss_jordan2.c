@@ -37,6 +37,7 @@ int main(int argc, char **argv) {
 
 	double *matrix = NULL;
 	double **row_pointers = NULL;
+	double **vector_pointers = NULL;
 	double *vector = NULL;
 	unsigned int dim;
 
@@ -64,11 +65,17 @@ int main(int argc, char **argv) {
 
 		fclose(file);
 
+		vector_pointers = (double **) malloc(dim * sizeof(double *));
+		for(i = 0; i < dim; i++) {
+			vector_pointers[i] = &vector[i];
+		}
+
 		for(i = 0; i < dim; i++) {
 			if(matrix[i * dim + i] == 0) {
 				for(j = 0; j < dim; j++) {
 					if((j != i) && (matrix[j * dim + i] != 0) && (matrix[i * dim + j] != 0)) {
 						double *aux = (double *) malloc(dim * sizeof(double));
+						double aux2;
 
 						memcpy(aux, &matrix[j * dim], dim * sizeof(double));
 						memcpy(&matrix[j * dim], &matrix[i * dim], dim * sizeof(double));
@@ -76,9 +83,17 @@ int main(int argc, char **argv) {
 
 						free(aux);
 
+						aux2 = vector[i];
+						vector[i] = vector[j];
+						vector[j] = aux2;
+
 						aux = row_pointers[i];
 						row_pointers[i] = row_pointers[j];
 						row_pointers[j] = aux;
+
+						aux = vector_pointers[i];
+						vector_pointers[i] = vector_pointers[j];
+						vector_pointers[j] = aux;
 						break;
 					}
 				}
@@ -169,9 +184,17 @@ int main(int argc, char **argv) {
 		MPI_Scatterv(update_vector, scounts2, displs2, MPI_DOUBLE, up_vector, scounts2[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
 		for(j = 0; j < scounts2[world_rank]; j++) {
-			for(k = 0; k < dim; k++) {
-				result_buffer[j * dim + k] = (pivot_row[i] * up_rows[j * dim + k]) - (up_rows[j * dim + i] * pivot_row[k]);
-				result_vector[j] = (pivot_row[i] * up_vector[j]) - (up_rows[j * dim + i] * pivot_vector_element);
+			if(up_rows[j * dim + i] != 0.0f) {
+				for(k = 0; k < dim; k++) {
+					result_buffer[j * dim + k] = (pivot_row[i] * up_rows[j * dim + k]) - (up_rows[j * dim + i] * pivot_row[k]);
+					result_vector[j] = (pivot_row[i] * up_vector[j]) - (up_rows[j * dim + i] * pivot_vector_element);
+				}
+			}
+			else {
+				for(k = 0; k < dim; k++) {
+					result_buffer[j * dim + k] = up_rows[j * dim + k];
+					result_vector[j] = up_vector[j];
+				}
 			}
 		}
 
@@ -191,17 +214,15 @@ int main(int argc, char **argv) {
 	}
 
 	if(world_rank == RANK_ROOT) {
-		#pragma omp parallel for private(i, j) num_threads(thread_count)
+		#pragma omp parallel for private(i, j) shared(matrix) num_threads(thread_count)
 		for(i = 0; i < dim; i++) {
-			double multiplier = (1 / (*(row_pointers[i] + i)));
-			for(j = 0; j < dim; j++)
-				*(row_pointers[i] + j) *= multiplier;
+			double multiplier = (1.0f / matrix[i * dim + i]);
 			vector[i] *= multiplier;
 		}
 
 		FILE *file = fopen("resultado.txt", "w");
 		for(i = 0; i < dim; i++) {
-			fprintf(file, "%.3f\n", vector[i]);
+			fprintf(file, "%.3lf\n", *(vector_pointers[i]));
 		}
 		fclose(file);
 		end = clock();
