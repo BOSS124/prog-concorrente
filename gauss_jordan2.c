@@ -168,7 +168,6 @@ int main(int argc, char **argv) {
 		MPI_Scatterv(update_rows, scounts, displs, MPI_DOUBLE, up_rows, scounts[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 		MPI_Scatterv(update_vector, scounts2, displs2, MPI_DOUBLE, up_vector, scounts2[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
-		#pragma omp parallel for num_threads(thread_count) shared(dim)
 		for(j = 0; j < scounts2[world_rank]; j++) {
 			for(k = 0; k < dim; k++) {
 				result_buffer[j * dim + k] = (pivot_row[i] * up_rows[j * dim + k]) - (up_rows[j * dim + i] * pivot_row[k]);
