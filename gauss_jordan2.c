@@ -214,10 +214,20 @@ int main(int argc, char **argv) {
 	}
 
 	if(world_rank == RANK_ROOT) {
+		for(j = 0; j < dim; j++) {
+			for(k = 0; k < dim; k++) {
+				printf("%.3lf ", matrix[j * dim + k]);
+			}
+			printf("\n");
+		}
+		
 		#pragma omp parallel for private(i, j) shared(matrix) num_threads(thread_count)
-		for(i = 0; i < dim; i++) {
-			double multiplier = (1.0f / matrix[i * dim + i]);
-			vector[i] *= multiplier;
+		for(j = 0; j < dim; j++) {
+			double multiplier = ceilf((1.0f / matrix[j * dim + j]) * 10000.0f) / 10000.0f;
+			printf("multiplier: %.3lf\n", multiplier);
+			for(k = 0; k < dim; k++)
+				matrix[j * dim + k] *= multiplier;
+			vector[j] *= multiplier;
 		}
 
 		FILE *file = fopen("resultado.txt", "w");
