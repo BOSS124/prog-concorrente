@@ -101,7 +101,7 @@ int main(int argc, char *argv[]) {
 
 	end = clock();
 
-	printf("Sequential: %lfms\n", time_elapsed_milis(end, begin));
+	printf("Matrix_length: %u\tSequential: %lfms\n", dim, time_elapsed_milis(end, begin));
 
 	free(matrix);
 	free(row_pointers);
