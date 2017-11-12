@@ -12,8 +12,13 @@
 
 #define ERROR_INCORRECT_ARGC	-1
 
+double time_elapsed_milis(clock_t end, clock_t begin) {
+	return ((double) (end - begin) / (double) (CLOCKS_PER_SEC / 1000));
+}
+
 int main(int argc, char **argv) {
 	int i, j, k;
+	clock_t begin, end;
 
 	/* Número de threads por processo passado como parâmetro ou igual a 2 */
 	int thread_count;
@@ -36,6 +41,7 @@ int main(int argc, char **argv) {
 	unsigned int dim;
 
 	if(world_rank == RANK_ROOT) {
+		begin = clock();
 		matrix = (double *) malloc(MATRIX_MAX_DIMENSION * MATRIX_MAX_DIMENSION * sizeof(double));
 		FILE *file = fopen("matriz.txt", "r");
 		unsigned int read = 0;
@@ -199,6 +205,9 @@ int main(int argc, char **argv) {
 			fprintf(file, "%.3f\n", vector[i]);
 		}
 		fclose(file);
+		end = clock();
+
+		printf("Num_process: %d\tThreads_per_process: %d\tMatrix_dimension: %d\tTime(ms): %lf\n", world_size, thread_count, dim, time_elapsed_milis(end, begin));
 	}
 	
 	/* Cleanup */
