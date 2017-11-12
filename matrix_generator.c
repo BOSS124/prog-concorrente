@@ -15,7 +15,7 @@ int main(int argc, char *argv[]) {
 
 		for(i = 0; i < rows; i++) {
 			for(j = 0; j < cols; j++) {
-				fprintf(matriz, "%.3lf ", (double) (rand() % 5 + 1) / 5);
+				fprintf(matriz, "%.3lf ", (double) (rand() % 5 + 1));
 			}
 			fprintf(matriz, "\n");
 		}
@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
 		vector = fopen("vetor.txt", "w");
 
 		for(i = 0; i < rows; i++) {
-			fprintf(vector, "%.3lf\n", (double) (rand() % 5 + 1) / 5);
+			fprintf(vector, "%.3lf\n", (double) (rand() % 5 + 1));
 		}
 
 		fclose(vector);
