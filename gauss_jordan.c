@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 #include <mpi.h>
 #include <time.h>
+#include <math.h>
 #include <omp.h>
 
 #define ERROR_PARAM_COUNT	-1
@@ -28,44 +30,23 @@ int main(int argc, char **argv) {
 	int world_rank;
 	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-	/* Verifica se os parâmetros foram passados corretamente */
-	if(argc != 3) {
-		printf("Você deve fornecer como parâmetro o número de linhas e colunas da matriz aumentada.\n"
-		"Tente novamente...\n");
-		MPI_Finalize();
-		return ERROR_PARAM_COUNT;
-	}
-
 	int rows, cols;
-	rows = atoi(argv[1]);
-	cols = atoi(argv[2]);
 
-	if(rows > cols) {
-		printf("O número de linhas da matriz deve ser menor ou igual ao número de colunas.\n");
-		MPI_Finalize();
-		return ERROR_ROW_COL_COUNT;
-	}
-
-	/* ----------------------------------------------------- */
-
-	/* O número de processos criados deve ser igual ao número de linhas da matriz menos 1 */
-	if(world_size != (rows - 1)) {
-		printf("O número de processos criados deve ser igual a: número de linhas da matriz - 1.\n");
-		MPI_Finalize();
-		return ERROR_PROCESS_COUNT;
-	}
-
-
-	/* Processo root aloca espaço na memória para guardar os elementos da matriz */
 	float *matrix = NULL;
 
 	if(world_rank == RANK_ROOT) {
-		matrix = (float *) calloc(rows * cols, sizeof(float));
-		for(i = 0; i < rows; i++) {
-			for(j = 0; j < cols; j++) {
-				scanf("%f", &matrix[i * cols + j]);
-			}
+		FILE *file = fopen("matriz.txt", "r");
+		float input;
+		size_t read = 0;
+		while(!feof(file)) {
+			fscanf(file, "%f", &input);
+			matrix = realloc(matrix, ++read);
 		}
+
+		fclose(file);
+
+		for(i = 0; i < read; i++)
+			printf("%.3f ", matrix[i]);
 	}
 
 	/* Verifica a ocorrência de elementos nulos na diagonal principal */
