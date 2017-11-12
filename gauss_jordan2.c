@@ -220,13 +220,10 @@ int main(int argc, char **argv) {
 			}
 			printf("\n");
 		}
-		
+
 		#pragma omp parallel for private(i, j) shared(matrix) num_threads(thread_count)
 		for(j = 0; j < dim; j++) {
-			double multiplier = ceilf((1.0f / matrix[j * dim + j]) * 10000.0f) / 10000.0f;
-			printf("multiplier: %.3lf\n", multiplier);
-			for(k = 0; k < dim; k++)
-				matrix[j * dim + k] *= multiplier;
+			double multiplier = (1.0f / matrix[j * dim + j]);
 			vector[j] *= multiplier;
 		}
 
