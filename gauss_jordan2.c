@@ -32,9 +32,6 @@ int main(int argc, char **argv) {
 	int thread_count;
 	thread_count = (argc == 2) ? atoi(argv[1]) : 2;
 
-	/* Inicializa o pseudo-gerador de números aleatórios */
-	srand(time(NULL));
-
 	/* Inicializa o ambiente de execução MPI */
 	MPI_Init(NULL, NULL);
 
@@ -74,15 +71,26 @@ int main(int argc, char **argv) {
 
 		fclose(file);
 
-		/*for(i = 0; i < dim; i++) {
-			if(*(row_pointers[i] + i) == 0) {
+		for(i = 0; i < dim; i++) {
+			if(matrix[i * dim + i] == 0) {
 				for(j = 0; j < dim; j++) {
-					if((j != i) && (*(row_pointers[j] + i) != 0) && (*(row_pointers[i] + j) != 0)) {
-						swap_rows(&row_pointers[i], &row_pointers[j], dim);
+					if((j != i) && (matrix[j * dim + i] != 0) && (matrix[i * dim + j] != 0)) {
+						double *aux = (double *) malloc(dim * sizeof(double));
+
+						memcpy(aux, &matrix[j * dim], dim * sizeof(double));
+						memcpy(&matrix[j * dim], &matrix[i * dim], dim * sizeof(double));
+						memcpy(&matrix[i * dim], aux, dim * sizeof(double));
+
+						free(aux);
+
+						aux = row_pointers[i];
+						row_pointers[i] = row_pointers[j];
+						row_pointers[j] = aux;
+						break;
 					}
 				}
 			}
-		}*/
+		}
 	}
 
 	MPI_Bcast(&dim, 1, MPI_UNSIGNED, RANK_ROOT, MPI_COMM_WORLD);
