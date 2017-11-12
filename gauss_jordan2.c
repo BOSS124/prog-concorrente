@@ -12,23 +12,10 @@
 
 #define ERROR_INCORRECT_ARGC	-1
 
-void swap_rows(double **row1_ptr, double **row2_ptr, unsigned int row_length) {
-	double *aux = (double *) malloc(row_length * sizeof(double));
-	double *aux_ptr = NULL;
-
-	memcpy(aux, *row1_ptr, row_length * sizeof(double));
-	memcpy(*row1_ptr, *row2_ptr, row_length * sizeof(double));
-	memcpy(*row2_ptr, aux, row_length * sizeof(double));
-	free(aux);
-
-	aux_ptr = *row1_ptr;
-	*row1_ptr = *row2_ptr;
-	*row2_ptr = aux_ptr;
-}
-
 int main(int argc, char **argv) {
 	int i, j, k;
 
+	/* Número de threads por processo passado como parâmetro ou igual a 2 */
 	int thread_count;
 	thread_count = (argc == 2) ? atoi(argv[1]) : 2;
 
@@ -148,10 +135,7 @@ int main(int argc, char **argv) {
 	up_vector = (double *) malloc(scounts2[world_rank] * sizeof(double));
 	result_vector = (double *) malloc(scounts2[world_rank] * sizeof(double));
 
-	/* Para cada linha da matriz seleciona o pivô (elemento da pertencente à diagonal principal) e atualiza os valores das outras linhas */
 	for(i = 0; i < dim; i++) {
-
-		/* Processo root aloca espaço para o buffer contendo as linhas que serão atualizadas na iteração do algoritmos (update_rows)*/
 		if(world_rank == RANK_ROOT) {
 			if(!update_rows)
 				update_rows = (double *) malloc((dim - 1) * dim * sizeof(double));
@@ -178,6 +162,7 @@ int main(int argc, char **argv) {
 		MPI_Scatterv(update_rows, scounts, displs, MPI_DOUBLE, up_rows, scounts[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 		MPI_Scatterv(update_vector, scounts2, displs2, MPI_DOUBLE, up_vector, scounts2[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
+		#pragma omp parallel for num_threads(thread_count) shared(dim)
 		for(j = 0; j < scounts2[world_rank]; j++) {
 			for(k = 0; k < dim; k++) {
 				result_buffer[j * dim + k] = (pivot_row[i] * up_rows[j * dim + k]) - (up_rows[j * dim + i] * pivot_row[k]);
