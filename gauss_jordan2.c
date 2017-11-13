@@ -10,8 +10,7 @@
 #define RANK_ROOT				0
 #define MATRIX_MAX_DIMENSION	10000
 
-#define ERROR_INCORRECT_ARGC	-1
-
+/* Retorna a diferença de tempo entre begin e end em milisegundos */
 double time_elapsed_milis(clock_t end, clock_t begin) {
 	return ((double) (end - begin) / (double) (CLOCKS_PER_SEC / 1000));
 }
@@ -41,9 +40,14 @@ int main(int argc, char **argv) {
 	double *vector = NULL;
 	unsigned int dim;
 
+	/* Processo root aloca espaço e recebe a matriz e o vetor como entrada */
 	if(world_rank == RANK_ROOT) {
 		begin = clock();
+
+		/* Vetor onde a matriz fica salva na memória do processo root */
 		matrix = (double *) malloc(MATRIX_MAX_DIMENSION * MATRIX_MAX_DIMENSION * sizeof(double));
+
+		/* Leitura do arquivo da matriz */
 		FILE *file = fopen("matriz.txt", "r");
 		unsigned int read = 0;
 		while(!feof(file))
@@ -51,12 +55,17 @@ int main(int argc, char **argv) {
 
 		fclose(file);
 
+		/* dim = sqrt(números lidos) */
 		dim = (unsigned int) sqrt((double) read);
+
+		/* Vetor de ponteiros que apontam para as linhas da matriz, utilizado para recuperar o resultado do
+		algoritmo na ordem correta no fim da execução */
 		row_pointers = (double**) malloc(dim * sizeof(double *));
 		for(i = 0; i < dim; i++) {
 			row_pointers[i] = &matrix[i * dim];
 		}
 
+		/* Leitura do arquivo do vetor */
 		file = fopen("vetor.txt", "r");
 		vector = (double *) malloc(dim * sizeof(double));
 		read = 0;
@@ -65,15 +74,19 @@ int main(int argc, char **argv) {
 
 		fclose(file);
 
+		/* Vetor de ponteiros que apontam para os elementos do vetor, utilizado para recuperar o resultado do 
+		algoritmo na ordem correta no fim da execução */
 		vector_pointers = (double **) malloc(dim * sizeof(double *));
 		for(i = 0; i < dim; i++) {
 			vector_pointers[i] = &vector[i];
 		}
 
+		/* Se um elemento da diagonal principal for igual à 0, é feita a troca de linhas */
 		for(i = 0; i < dim; i++) {
-			if(matrix[i * dim + i] == 0) {
-				for(j = 0; j < dim; j++) {
+			if(matrix[i * dim + i] == 0) { //matriz[i][i] == 0 ?
+				for(j = 0; j < dim; j++) { //itera entre todas as outras linhas para encontrar uma possível candidata a troca
 					if((j != i) && (matrix[j * dim + i] != 0) && (matrix[i * dim + j] != 0)) {
+						/* Troca linha i e j */
 						double *aux = (double *) malloc(dim * sizeof(double));
 						double aux2;
 
@@ -101,8 +114,10 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	/* Todos processos recebem a dimensão da matriz na variável dim */
 	MPI_Bcast(&dim, 1, MPI_UNSIGNED, RANK_ROOT, MPI_COMM_WORLD);
 
+	/* Ponteiros para os buffers utilizados nas iterações do algoritmo */
 	double *pivot_row = (double *) malloc(dim * sizeof(double));
 	double *up_rows = NULL;
 	double *up_vector = NULL;
@@ -111,7 +126,10 @@ int main(int argc, char **argv) {
 	double pivot_vector_element;
 	double *result_buffer;
 	double *result_vector;
+	/* --------------------------------------------------------------- */
 
+	/* Vetores utilizados pelo MPI_Scatterv e MPI_Gatherv para dividir as linhas da matriz entre os
+	processos */
 	int *displs = NULL;
 	int *displs2 = NULL;
 	int *scounts = NULL;
@@ -134,7 +152,11 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	/* up_rows: buffer utilizado para receber as linhas da matriz a serem atualizadas pelo processo através do
+	MPI_Scatterv */
 	up_rows = (double *) malloc(scounts[world_rank] * sizeof(double));
+	/* result_buffer: buffer onde as linhas atualizadas serão salvas para serem enviadas de volta para o processo root
+	através do MPI_Gatherv */
 	result_buffer = (double *) malloc(scounts[world_rank] * sizeof(double));
 
 	displs2 = (int *) calloc(world_size, sizeof(int));
@@ -153,10 +175,18 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	/* up_vector: buffer utilizado para receber os elementos do vetor a serem atualizados pelo processo através do
+	MPI_Scatterv */
 	up_vector = (double *) malloc(scounts2[world_rank] * sizeof(double));
+	/* result_vector: buffer onde os elementos do vetor atualizados serão salvos para serem enviados de volta para o
+	processo root através do MPI_Gatherv */
 	result_vector = (double *) malloc(scounts2[world_rank] * sizeof(double));
 
+	/* Itera entre todas as linhas da matriz sequencialmente, devido a dependência de dados entre uma iteração e outra,
+	realizando a operação de eliminação Gaussiana */
 	for(i = 0; i < dim; i++) {
+		/* Processo root separa as linhas não-pivô em um buffer separado(update_rows e update_vector) para serem distribuídas entre os
+		processos pelo MPI_Gatherv */
 		if(world_rank == RANK_ROOT) {
 			if(!update_rows)
 				update_rows = (double *) malloc((dim - 1) * dim * sizeof(double));
@@ -172,17 +202,29 @@ int main(int argc, char **argv) {
 				}
 			}
 
+			/* A linha pivô da iteração fica num buffer separado para enviar para todos os processos, uma vez
+			que todos precisarão dela para efetuar o processo de eliminação */
 			memcpy(pivot_row, &matrix[i * dim], dim * sizeof(double));
 			pivot_vector_element = vector[i];
 		}
 
+		/* Todos os processos recebem a linha pivô da iteração no buffer pivot_row */
 		MPI_Bcast(pivot_row, dim, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
+		/* Todos os processos recebem o elemento do vetor referente à linha pivô na variável pivot_vector_element */
 		MPI_Bcast(&pivot_vector_element, 1, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
+		/* Cada processo recebe uma quantia de linhas da matriz e elementos do vetor para realizar o processo de eliminação */
 		MPI_Scatterv(update_rows, scounts, displs, MPI_DOUBLE, up_rows, scounts[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 		MPI_Scatterv(update_vector, scounts2, displs2, MPI_DOUBLE, up_vector, scounts2[world_rank], MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
+		/* Eliminação: L[i][j] = (L[k][k] * L[i][j]) - (L[i][k] * L[k][j])
+		i = index da linha sendo atualizada
+		j = index do elemento da linha sendo atualizada
+		k = index da linha pivô
+
+		OBS: se L[i][k] for igual a 0 não há necessidade de alterar a linha, portanto apenas copia os valores para os
+		buffers de resultado */
 		for(j = 0; j < scounts2[world_rank]; j++) {
 			if(up_rows[j * dim + i] != 0.0f) {
 				for(k = 0; k < dim; k++) {
@@ -198,9 +240,11 @@ int main(int argc, char **argv) {
 			}
 		}
 
+		/* O processo root recebe de volta as linhas da matriz e elementos do vetor atualizados pelos processos */
 		MPI_Gatherv(result_buffer, scounts[world_rank], MPI_DOUBLE, update_rows, scounts, displs, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 		MPI_Gatherv(result_vector, scounts2[world_rank], MPI_DOUBLE, update_vector, scounts2, displs2, MPI_DOUBLE, RANK_ROOT, MPI_COMM_WORLD);
 
+		/* Processo root remonta o buffer da matriz(matrix) com os dados atualizados que acaba de receber pelo MPI_Gatherv */
 		if(world_rank == RANK_ROOT) {
 			int rindex = 0;
 
@@ -213,31 +257,37 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	/* Nesse ponto a matriz reduzida deve possuir apenas os elementos da diagonal principal diferentes de 0 e portanto realiza-se 
+	a última etapa do algoritmo onde 
+		L[i][j] = L[i][j] * (1 / L[i][i])
+	ou seja, cada elemento de cada linha é multiplicado pelo inverso do elemento da diagonal da própria linha,
+	dessa maneira não se altera o determinante da matriz e a matriz reduzida se torna a matriz identidade.
+	Ao final os elementos do vetor(vector) apresentam a solução do processo de escalonamento */
 	if(world_rank == RANK_ROOT) {
-		for(j = 0; j < dim; j++) {
-			for(k = 0; k < dim; k++) {
-				printf("%.3lf ", matrix[j * dim + k]);
-			}
-			printf("\n");
-		}
-
 		#pragma omp parallel for private(i, j) shared(matrix) num_threads(thread_count)
 		for(j = 0; j < dim; j++) {
-			double multiplier = (1.0f / matrix[j * dim + j]);
+			double multiplier = (1.0f / matrix[j * dim + j]); //multiplicador = inverso do elemento da diagonal principal
 			vector[j] *= multiplier;
 		}
 
+		/* Cria-se ou abre para escrita um arquivo resultado.txt onde os elementos de vector serão salvos com um valor por
+		linha do arquivo */
 		FILE *file = fopen("resultado.txt", "w");
 		for(i = 0; i < dim; i++) {
-			fprintf(file, "%.3lf\n", *(vector_pointers[i]));
+			fprintf(file, "%.3lf\n", *(vector_pointers[i])); //vector_pointers usado pois guarda a sequência original do vetor, mesmo após troca de linhas
 		}
 		fclose(file);
+
 		end = clock();
 
+		/* Num_process = número de processos que executaram o algoritmo de escalonamento de Gauss-Jordan
+		Threads_per_process = número de threads executando por processo
+		Matrix_dimension = dimensão da matriz utilizada pelo programa
+		Time(ms) = tempo em milisegundo para execução do programa */
 		printf("Num_process: %d\tThreads_per_process: %d\tMatrix_dimension: %d\tTime(ms): %lf\n", world_size, thread_count, dim, time_elapsed_milis(end, begin));
 	}
 	
-	/* Cleanup */
+	/* Liberação de memória */
 	free(matrix);
 	free(row_pointers);
 	free(vector);
